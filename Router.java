@@ -84,7 +84,70 @@ public class Router extends Device
 		
 		/********************************************************************/
 		/* TODO: Handle packets                                             */
-		
+		if (etherPacket.getEtherType() != Ethernet.TYPE_IPv4) {
+			System.out.println("Dropped! - not IPv4");
+			return;
+		}
+
+		IPv4 packet = (IPv4) etherPacket.getPayload();
+		if (!verifyChecksum(packet)) {
+			System.out.println("Dropped! - invalid checksum");
+			return;
+		}
+
+		int newTtl = packet.getTtl() - 1;
+		if (newTtl <= 0) {
+			System.out.println("Dropped! - arthritis");
+			return;
+		}
+		packet.setTtl((byte)newTtl);
+
+		if (isInterfaceBound(packet)) {
+			System.out.println("Dropped! - bound for interface");
+			return;
+		}
+
+		RouteEntry target = routeTable.lookup(packet.getDestinationAddress());
+		if (target == null) {
+			System.out.println("Dropped! - unknown destination address");
+			return;
+		}
+
+		// Don't send a packet out the iface it comes in on
+		if(inIface == target.getInterface()) {
+			System.out.println("Dropped! - packet destined for iface it entered on");
+			return;
+		}
+
+		int outgoingAddress = target.getInterface().getIpAddress();
+		System.out.printf("Lookup outgoing MAC from: %08X\n", outgoingAddress);
+		ArpEntry sourceArp = arpCache.lookup(outgoingAddress);
+		if (sourceArp == null) {
+			System.out.println("Dropped! - unknown arp entry");
+			return;
+		}
+
+		int destinationAddress = target.getGatewayAddress();
+		if (destinationAddress == 0) {
+			destinationAddress = packet.getDestinationAddress();
+			System.out.printf("Final Jump To: %08X\n", destinationAddress);
+		}
+		ArpEntry destinationArp = arpCache.lookup(destinationAddress);
+		if (destinationArp == null) {
+			System.out.println("Dropped! - unknown destination arp entry");
+			return;
+		}
+		etherPacket.setDestinationMACAddress(destinationArp.getMac().toBytes());
+
+		System.out.println("Setting source to: " + sourceArp.getMac());
+		etherPacket.setSourceMACAddress(sourceArp.getMac().toBytes());
+		System.out.println("Destination MAC is: " + etherPacket.getDestinationMAC());
+
+		// See IPV4 ln 285
+		packet.resetChecksum();
+
+		System.out.println("Sending packet out iFace: " + target.getInterface());
+		sendPacket(etherPacket, target.getInterface());
 		
 		/********************************************************************/
 	}
