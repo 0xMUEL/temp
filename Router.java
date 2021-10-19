@@ -89,97 +89,108 @@ public class Router extends Device
 		
 		/********************************************************************/
 		/* TODO: Handle packets                                             */
+
+		// --- not IPv4 --- 
 		if (etherPacket.getEtherType() != Ethernet.TYPE_IPv4) {
-			System.out.println("Dropped! - not IPv4");
+			System.out.println("Fail: Packet Dropped");
 			return;
 		}
+		// --- not IPv4 --- 
 
+		// --- check checksum ---
+		// TODO: boolean isValidChecksum = false;
 		IPv4 packet = (IPv4) etherPacket.getPayload();
-		if (!verifyChecksum(packet)) {
-			System.out.println("Dropped! - invalid checksum");
+		int count = 0;
+		ByteBuffer bb = ByteBuffer.wrap(packet.serialize());
+		bb.rewind();
+		for (int i = 0; i < packet.getHeaderLength() * 2; ++i) {
+			short part = bb.getShort();
+			if (i != 5) // skip the checksum
+				count += 0xffff & part;
+		}
+		count = ((count >> 16) & 0xffff)
+				+ (count & 0xffff);
+		short checksum = (short) (~count & 0xffff);
+		
+		// TODO: isValidChecksum = (checksum == packet.getChecksum());
+
+		if (checksum != packet.getChecksum()) {
+			System.out.println("Fail: Packet Dropped");
 			return;
 		}
+		// --- check checksum ---
 
+		// --- check ttl ---
 		int newTtl = packet.getTtl() - 1;
 		if (newTtl <= 0) {
-			System.out.println("Dropped! - arthritis");
+			System.out.println("Fail: Packet Dropped");
 			return;
 		}
 		packet.setTtl((byte)newTtl);
+		// --- check ttl ---
 
-		if (isInterfaceBound(packet)) {
-			System.out.println("Dropped! - bound for interface");
+		// --- check if the packet is interface bound ---
+		boolean isBound = false;
+		for (Map.Entry<String, Iface> iface : interfaces.entrySet()) {
+			if (iface.getValue().getIpAddress() == packet.getDestinationAddress())
+				isBound = true;
+		}
+		if (isBound) {
+			System.out.println("Fail: Packet Dropped");
 			return;
 		}
+		// --- check if the packet is interface bound ---
 
+		// --- check dest addr ---
 		RouteEntry target = routeTable.lookup(packet.getDestinationAddress());
 		if (target == null) {
-			System.out.println("Dropped! - unknown destination address");
+			System.out.println("Fail: Packet Dropped");
 			return;
 		}
+		// --- check dest addr ---
 
-		// Don't send a packet out the iface it comes in on
+		// --- send and recieve by the same interface ---
 		if(inIface == target.getInterface()) {
-			System.out.println("Dropped! - packet destined for iface it entered on");
+			System.out.println("Fail: Packet Dropped");
 			return;
 		}
+		// --- send and recieve by the same interface ---
 
-		int outgoingAddress = target.getInterface().getIpAddress();
-		System.out.printf("Lookup outgoing MAC from: %08X\n", outgoingAddress);
-		ArpEntry sourceArp = arpCache.lookup(outgoingAddress);
+		// --- check out addr ---
+		int out_addr = target.getInterface().getIpAddress();
+		// TODO: System.out.printf("Lookup outgoing MAC from: %08X\n", out_addr);
+		ArpEntry sourceArp = arpCache.lookup(out_addr);
 		if (sourceArp == null) {
-			System.out.println("Dropped! - unknown arp entry");
+			System.out.println("Fail: Packet Dropped");
 			return;
 		}
+		// --- check out addr ---
 
-		int destinationAddress = target.getGatewayAddress();
-		if (destinationAddress == 0) {
-			destinationAddress = packet.getDestinationAddress();
-			System.out.printf("Final Jump To: %08X\n", destinationAddress);
+		// --- check arp ---
+		int dest_addr = target.getGatewayAddress();
+		if (dest_addr == 0) {
+			dest_addrs = packet.getDestinationAddress();
+			// TODO: System.out.printf("Final Jump To: %08X\n", destinationAddress);
 		}
-		ArpEntry destinationArp = arpCache.lookup(destinationAddress);
-		if (destinationArp == null) {
-			System.out.println("Dropped! - unknown destination arp entry");
+		ArpEntry dest_Arp = arpCache.lookup(dest_addr);
+		if (dest_Arp == null) {
+			System.out.println("Fail: Packet Dropped");
 			return;
 		}
-		etherPacket.setDestinationMACAddress(destinationArp.getMac().toBytes());
+		etherPacket.setDestinationMACAddress(dest_Arp.getMac().toBytes());
+		// --- check arp ---
 
-		System.out.println("Setting source to: " + sourceArp.getMac());
+		// TODO: System.out.println("Setting source to: " + sourceArp.getMac());
 		etherPacket.setSourceMACAddress(sourceArp.getMac().toBytes());
-		System.out.println("Destination MAC is: " + etherPacket.getDestinationMAC());
+		// TODO: System.out.println("Destination MAC is: " + etherPacket.getDestinationMAC());
 
 		// See IPV4 ln 285
 		packet.resetChecksum();
 
-		System.out.println("Sending packet out iFace: " + target.getInterface());
+		// TODO: System.out.println("Sending packet out iFace: " + target.getInterface());
 		sendPacket(etherPacket, target.getInterface());
 
 		/********************************************************************/
 	}
-
-	private boolean isInterfaceBound(IPv4 packet) {
-		for (Map.Entry<String, Iface> iface : interfaces.entrySet()) {
-			if (iface.getValue().getIpAddress() == packet.getDestinationAddress())
-				return true;
-		}
-		return false;
-	}
-
-	private static boolean verifyChecksum(IPv4 packet) {
-		ByteBuffer bb = ByteBuffer.wrap(packet.serialize());
-		bb.rewind();
-		int headerLength = packet.getHeaderLength();
-		int accumulation = 0;
-		for (int i = 0; i < headerLength * 2; ++i) {
-			short part = bb.getShort();
-			if (i != 5) // skip the checksum
-				accumulation += 0xffff & part;
-		}
-		accumulation = ((accumulation >> 16) & 0xffff)
-				+ (accumulation & 0xffff);
-		short checksum = (short) (~accumulation & 0xffff);
-		return checksum == packet.getChecksum();
-	}
-
 
 }

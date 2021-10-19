@@ -39,15 +39,21 @@ public class RouteTable
         {
 			/*****************************************************************/
 			/* TODO: Find the route entry with the longest prefix match      */
-			int maxMatch = -1;
+			int max = -1;
 			RouteEntry target = null;
 			for (RouteEntry entry : entries) {
-				int mask = entry.getMaskAddress();
+				int maskAddress = entry.getMaskAddress();	
 				int subnet = entry.getDestinationAddress();
-				if ((ip & mask) == (subnet & mask)) {
-					int temp = countOnes(mask);
-					if (temp > maxMatch) {
-						maxMatch = temp;
+				// compare two address and get the set bits
+				if ((ip & maskAddress) == (subnet & maskAddress)) {
+					// --- find number of set bits ---
+					maskAddress = maskAddress - ((maskAddress >> 1) & 0x55555555);
+					maskAddress = (maskAddress & 0x33333333) + ((maskAddress >> 2) & 0x33333333); 
+					int temp = ((maskAddress + (maskAddress >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
+					// --- find number of set bits ---
+					if (temp > max) {
+						// update max 
+						max = temp;
 						target = entry;
 					}
 				}
@@ -56,18 +62,6 @@ public class RouteTable
 			
 			/*****************************************************************/
         }
-	}
-
-	/**
-	 * Count the number of set bits in a mask
-	 * (see StackOverflow http://stackoverflow.com/questions/109023/how-to-count-the-number-of-set-bits-in-a-32-bit-integer)
-	 * @param mask
-	 * @return
-	 */
-	private static int countOnes(int mask) {
-		mask = mask - ((mask >> 1) & 0x55555555);                // put count of each 2 bits into those 2 bits
-		mask = (mask & 0x33333333) + ((mask >> 2) & 0x33333333); // put count of each 4 bits into those 4 bits
-		return ((mask + (mask >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
 	}
 	
 	/**
