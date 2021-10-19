@@ -1,12 +1,16 @@
-package edu.wisc.cs.sdn.vnet.rt; 
-import edu.wisc.cs.sdn.vnet.Device; 
-import edu.wisc.cs.sdn.vnet.DumpFile; 
-import edu.wisc.cs.sdn.vnet.Iface; 
-import net.floodlightcontroller.packet.Ethernet; 
-import net.floodlightcontroller.packet.IPv4; 
-import net.floodlightcontroller.packet.MACAddress; 
-import java.nio.ByteBuffer; 
+package edu.wisc.cs.sdn.vnet.rt;
+
+import edu.wisc.cs.sdn.vnet.Device;
+import edu.wisc.cs.sdn.vnet.DumpFile;
+import edu.wisc.cs.sdn.vnet.Iface;
+
+import net.floodlightcontroller.packet.Ethernet;
+import net.floodlightcontroller.packet.IPv4;
+import net.floodlightcontroller.packet.MACAddress;
+
+import java.nio.ByteBuffer;
 import java.util.Map;
+
 /**
  * @author Aaron Gember-Jacobson and Anubhavnidhi Abhashkumar
  */
@@ -149,7 +153,33 @@ public class Router extends Device
 
 		System.out.println("Sending packet out iFace: " + target.getInterface());
 		sendPacket(etherPacket, target.getInterface());
-		
+
 		/********************************************************************/
 	}
+
+	private boolean isInterfaceBound(IPv4 packet) {
+		for (Map.Entry<String, Iface> iface : interfaces.entrySet()) {
+			if (iface.getValue().getIpAddress() == packet.getDestinationAddress())
+				return true;
+		}
+		return false;
+	}
+
+	private static boolean verifyChecksum(IPv4 packet) {
+		ByteBuffer bb = ByteBuffer.wrap(packet.serialize());
+		bb.rewind();
+		int headerLength = packet.getHeaderLength();
+		int accumulation = 0;
+		for (int i = 0; i < headerLength * 2; ++i) {
+			short part = bb.getShort();
+			if (i != 5) // skip the checksum
+				accumulation += 0xffff & part;
+		}
+		accumulation = ((accumulation >> 16) & 0xffff)
+				+ (accumulation & 0xffff);
+		short checksum = (short) (~accumulation & 0xffff);
+		return checksum == packet.getChecksum();
+	}
+
+
 }
