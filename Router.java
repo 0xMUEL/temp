@@ -169,7 +169,7 @@ public class Router extends Device
 		// --- check arp ---
 		int dest_addr = target.getGatewayAddress();
 		if (dest_addr == 0) {
-			dest_addrs = packet.getDestinationAddress();
+			dest_addr = packet.getDestinationAddress();
 			// TODO: System.out.printf("Final Jump To: %08X\n", destinationAddress);
 		}
 		ArpEntry dest_Arp = arpCache.lookup(dest_addr);
