@@ -12,72 +12,89 @@ import java.util.Map;
 /**
  * @author Aaron Gember-Jacobson
  */
-public class Switch extends Device
-{
-	private static class MACAddressInfo {
-		public MACAddressInfo(Iface direction) {
-			this.direction = direction;
-			this.createTime = System.currentTimeMillis();
-		}
-		Iface direction;
-		long createTime;
+public class Switch extends Device {
 
-		public boolean isExpired() {
-			return (System.currentTimeMillis() - this.createTime) >= 15000;
-		}
-	}
+    Map<MACAddress, Iface> bridgeMap = new HashMap<>();
+    Map<MACAddress, Long> timeMap = new HashMap<>();
 
-	private Map<MACAddress, MACAddressInfo> macAddressMap = new HashMap<>();
+    /**
+     * Creates a router for a specific host.
+     *
+     * @param host hostname for the router
+     */
+    public Switch(String host, DumpFile logfile) {
+        super(host, logfile);
+    }
 
-	/**
-	 * Creates a router for a specific host.
-	 * @param host hostname for the router
-	 */
-	public Switch(String host, DumpFile logfile)
-	{
-		super(host,logfile);
-	}
+    /**
+     * Update the entries in the forwarding table
+     *
+     * @param src
+     * @param port
+     */
+    public void updateTable(MACAddress src, Iface port) {
+        if (!bridgeMap.containsKey(src)) {
+            Long time = System.nanoTime();
+            bridgeMap.put(src, port);
+            timeMap.put(src, time);
+        }
+    }
 
-	/**
-	 * Handle an Ethernet packet received on a specific interface.
-	 * @param etherPacket the Ethernet packet that was received
-	 * @param inIface the interface on which the packet was received
-	 */
-	public void handlePacket(Ethernet etherPacket, Iface inIface)
-	{
-		System.out.println("*** -> Received packet: " +
-				etherPacket.toString().replace("\n", "\n\t"));
+    /**
+     * Timeout outdated MAC addresses
+     */
+    public void timeOut() {
+        for (MACAddress addr: bridgeMap.keySet()) {
+            if (timeMap.containsKey(addr)) {
+                long duration = System.nanoTime() - timeMap.get(addr);
+                if (duration > (long) 15 * 1E9) {
+                    bridgeMap.remove(addr);
+                    timeMap.remove(addr);
+                }
+            }
+        }
+    }
 
-		learnPacket(etherPacket, inIface);
+    /**
+     * Handle an Ethernet packet received on a specific interface.
+     *
+     * @param etherPacket the Ethernet packet that was received
+     * @param inIface     the interface on which the packet was received
+     */
+    public void handlePacket(Ethernet etherPacket, Iface inIface) {
+        System.out.println("*** -> Received packet: " +
+                etherPacket.toString().replace("\n", "\n\t"));
 
-		Iface outgoing = findInterface(etherPacket.getDestinationMAC());
-		if (outgoing != null)
-			sendPacket(etherPacket, outgoing);
-		else
-			broadcast(etherPacket, inIface);
-	}
+        // Handle packets
+        timeOut();
+        try {
+            MACAddress sourceAddr = etherPacket.getSourceMAC();
+            MACAddress destAddr = etherPacket.getDestinationMAC();
+            updateTable(sourceAddr, inIface);
 
-	private void learnPacket(Ethernet packet, Iface from) {
-		macAddressMap.put(packet.getSourceMAC(), new MACAddressInfo(from));
-	}
+            // Update the info for interfaces
+            Iface port = this.interfaces.get(inIface.getName());
+            port.setMacAddress(sourceAddr);
 
-	private Iface findInterface(MACAddress addr) {
-		if (macAddressMap.containsKey(addr)) {
-			MACAddressInfo info = macAddressMap.get(addr);
-			if (info.isExpired()) {
-				macAddressMap.remove(addr);
-				return null;
-			}
-			return info.direction;
-		}
-		return null;
-	}
-
-	private void broadcast(Ethernet packet, Iface ignore) {
-		for (Map.Entry<String, Iface> out : getInterfaces().entrySet()) {
-			if (!out.getValue().equals(ignore)) {
-				sendPacket(packet, out.getValue());
-			}
-		}
-	}
+            // Forward/Flood the packets
+            Iface outFace;
+            if (bridgeMap.containsKey(destAddr)) {  // Is address available in the forwarding table?
+                // Forward frame only from the port which is connected to the
+                // destination address
+                outFace = bridgeMap.get(destAddr);
+                assert (sendPacket(etherPacket, outFace));
+            } else {
+                // Forward frame from all ports except one on which the frame
+                // has arrived
+                for (String name : this.interfaces.keySet()) {
+                    if (!name.equals(inIface.getName())) {
+                        outFace = this.interfaces.get(name);
+                        assert (sendPacket(etherPacket, outFace));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.out.println(e.getMessage());
+        }
+    }
 }
